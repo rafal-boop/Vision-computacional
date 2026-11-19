@@ -5,6 +5,8 @@ seaborn
 matplotlib
 Pillow
 torch
+torchvision
+scikit-learn
 albumentations
 timm
 kaggle
