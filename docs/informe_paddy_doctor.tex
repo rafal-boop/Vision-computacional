@@ -1,0 +1,210 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[a4paper,margin=2.35cm]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!45!black,
+    citecolor=blue!45!black,
+    urlcolor=blue!55!black
+}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\pendiente}{\textcolor{orange!70!black}{\textbf{Pendiente}}}
+\newcommand{\metricapendiente}{\textemdash}
+
+\title{Comparación controlada de CNN, Vision Transformer e híbrido para la clasificación de enfermedades del arroz}
+\author{[Nombre del autor]}
+\date{Borrador de trabajo -- \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Se presenta una comparación bibliográfica de tres estudios sobre Paddy Doctor y el protocolo de un benchmark local de cuatro clasificadores: ResNet34, EfficientNet-B0, ViT-Small/16 y una fusión de EfficientNet-B0 con ViT-Small/16. Los artículos reportan, entre otros resultados, 97.50\% de F1 para ResNet34, 99.38\% de accuracy para un Vision Transformer y 98.52\% de accuracy junto con 97.54\% de F1 para un pipeline MobileNetV3--GKSO-SA--CatBoost. El mayor valor nominal de accuracy es el del estudio con Vision Transformer, pero los conjuntos, particiones y métricas difieren; por tanto, no establece un ganador comparable. El conjunto local contiene 10\,407 imágenes en diez clases. Se documenta una partición estratificada 80/10/10, aumentos solo durante entrenamiento y selección de checkpoints por F1 macro de validación. Una captura de la ejecución actual muestra ResNet34 en la época 20/20 y EfficientNet-B0 en la época 3/20, con métricas de validación intermedias; no se muestran resultados de test ni el dispositivo utilizado.
+\end{abstract}
+
+\noindent\textbf{Palabras clave:} enfermedades del arroz, clasificación de imágenes, transferencia de aprendizaje, ResNet34, EfficientNet, Vision Transformer, F1 macro.
+
+\section{Introducción}
+Las enfermedades foliares del arroz pueden reducir el rendimiento del cultivo y su identificación visual oportuna es una tarea relevante para la agricultura. La clasificación automática a partir de fotografías puede servir como apoyo a la inspección, pero el resultado depende de la representatividad de los datos, de la separación entre entrenamiento y prueba y de la capacidad del modelo para reconocer clases minoritarias.
+
+Este trabajo compara cuatro alternativas bajo el mismo protocolo y sobre los mismos ejemplos. La pregunta principal es: \emph{¿qué arquitectura ofrece el mejor equilibrio entre F1 macro en test, desempeño por clase y costo computacional en la versión local del conjunto Paddy Doctor?} No se presupone que el modelo híbrido sea superior: la fusión de características locales y globales puede mejorar la clasificación, pero también aumenta el número de parámetros, la memoria y el tiempo de inferencia.
+
+El objetivo es medir el desempeño relativo de las cuatro arquitecturas en una partición controlada. Las cifras publicadas por otros estudios se presentan como contexto, no como una comparación directa, porque difieren en versión del conjunto, número de clases, particiones y, en un caso, tarea de detección en lugar de clasificación.
+
+\section{Antecedentes y trabajos relacionados}
+Petchiammal et al.\ presentan Paddy Doctor como conjunto de imágenes y benchmark de clasificación; el estudio reporta 16\,225 imágenes en 13 clases y un F1 de 97.50\% para ResNet34 \cite{petchiammal2023}. Khanal et al.\ comparan modelos de detección y clasificación, informan 99.38\% de accuracy para Vision Transformer y mAP@0.5 de 69\% para detección con YOLOv8 \cite{khanal2024}. El manuscrito presenta discrepancias entre algunas cifras de sus distintas secciones, por lo que sus valores requieren una lectura cautelosa.
+
+Subbarayudu y Kubendiran describen un sistema híbrido que usa MobileNetV3 para extraer características, selección GKSO-SA y CatBoost para clasificar; el artículo usa 13\,866 imágenes en 13 clases y reporta 98.52\% de accuracy y 97.54\% de F1 \cite{subbarayudu2025}. Esa canalización no es la misma que la fusión neuronal de dos backbones evaluada aquí.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Referencias de la literatura y resultados reportados por sus autores. No son resultados de este experimento.}
+\begin{tabularx}{\textwidth}{p{2.8cm}p{3.4cm}p{2.5cm}Y}
+\toprule
+Estudio & Datos y tarea reportados & Resultado citado & Diferencia principal respecto a este experimento \\
+\midrule
+Petchiammal et al.\ (2023) & Paddy Doctor; 16\,225 imágenes, 13 clases; clasificación & ResNet34: F1 97.50\% & Versión y partición diferentes; el promedio de F1 debe interpretarse según el protocolo original. \\
+Khanal et al.\ (2024) & Clasificación y detección & ViT: accuracy 99.38\%; YOLOv8: mAP@0.5 69\% & La detección es una tarea distinta; además, las cifras de clasificación presentan discrepancias internas. \\
+Subbarayudu y Kubendiran (2025) & 13\,866 imágenes, 13 clases; MobileNetV3 + GKSO-SA + CatBoost & Accuracy 98.52\%; F1 97.54\% & Clasificador y pipeline distintos; protocolo y versión de datos no coinciden con la partición local. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{¿Cuál parece mejor según los artículos?}
+Si se compara únicamente el mayor valor nominal de \emph{accuracy} de clasificación, el artículo de Khanal et al.\ reporta el valor más alto: 99.38\% para Vision Transformer. El artículo de Subbarayudu y Kubendiran reporta 98.52\% de accuracy para un pipeline completo de MobileNetV3, selección de características GKSO-SA y CatBoost; la diferencia aritmética es 0.86 puntos porcentuales. No debe interpretarse como una mejora medida en una comparación directa: los estudios no comparten necesariamente las mismas imágenes, particiones ni condiciones de evaluación. Tampoco se debe asumir que el Transformer del artículo sea idéntico a ViT-Small/16. El 97.50\% de F1 de ResNet34 pertenece a otra métrica y tampoco puede ordenarse directamente frente a esas accuracies.
+
+Por ello, la conclusión más defendible es doble: \textbf{Vision Transformer es el modelo con mayor accuracy publicado entre las cifras revisadas}, y \textbf{no hay evidencia suficiente para declarar un ganador científico entre los tres estudios}. La atención global de un Transformer es una explicación plausible para su resultado, no una prueba causal de superioridad. Para el benchmark local, ViT-Small/16 merece atención como candidato; el híbrido también es una hipótesis, pero solo la evaluación común en las diez clases locales permitirá decidir.
+
+\section{Datos y protocolo experimental}
+\subsection{Conjunto de datos}
+Se utiliza la copia local de Paddy Doctor con 10\,407 imágenes y diez etiquetas. La frecuencia de clases no es uniforme: la clase con menos imágenes tiene 337 ejemplos y la de mayor frecuencia, 1\,738. Para construir las rutas se combina cada nombre de clase con \texttt{image\_id} de \texttt{train.csv}; el notebook verifica la existencia de las imágenes antes de entrenar.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Distribución de etiquetas en la descarga local.}
+\begin{tabular}{lr@{\qquad}lr}
+\toprule
+Clase & Imágenes & Clase & Imágenes \\
+\midrule
+\texttt{bacterial\_leaf\_blight} & 479 & \texttt{bacterial\_leaf\_streak} & 380 \\
+\texttt{bacterial\_panicle\_blight} & 337 & \texttt{blast} & 1\,738 \\
+\texttt{brown\_spot} & 965 & \texttt{dead\_heart} & 1\,442 \\
+\texttt{downy\_mildew} & 620 & \texttt{hispa} & 1\,594 \\
+\texttt{normal} & 1\,764 & \texttt{tungro} & 1\,088 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Partición}
+Se aplica una partición estratificada con semilla 42, fija y común a todos los modelos. Primero se separa el 10\% para test y luego se divide el 90\% restante para obtener 80\% de entrenamiento y 10\% de validación. En la copia inspeccionada esto produce 8\,325 imágenes de entrenamiento, 1\,041 de validación y 1\,041 de test. La partición se crea antes de los aumentos. Validación se usa para selección y early stopping; test se reserva para una sola evaluación final de cada modelo.
+
+\subsection{Preprocesamiento y aumentos}
+Todas las imágenes se convierten a RGB, se redimensionan a \(224\times224\) y se normalizan con media y desviación estándar de ImageNet. Durante el entrenamiento se aplican transformaciones aleatorias al vuelo: volteo horizontal y vertical (probabilidad 0.5), transformación afín moderada (rotación hasta \(5^\circ\), traslación hasta 5\%, escala entre 0.90 y 1.10 y shear hasta \(5^\circ\)) y cambios de brillo, contraste, saturación y tono. Validación y test solo reciben redimensionamiento y normalización.
+
+El aumento en línea no crea copias adicionales en disco ni cambia el número de observaciones; genera variaciones aleatorias de los ejemplos de entrenamiento entre épocas. La moderación de las transformaciones busca evitar alterar en exceso el color de las lesiones o eliminar detalles pequeños.
+
+Para compensar el desbalance se calcula, únicamente con las frecuencias del conjunto de entrenamiento, un peso por clase:
+\[
+w_c = \frac{N_{\mathrm{train}}}{K\,n_c},
+\]
+donde \(N_{\mathrm{train}}\) es el número de imágenes de entrenamiento, \(K\) el número de clases y \(n_c\) la frecuencia de la clase \(c\). Estos pesos se usan en la entropía cruzada con label smoothing de 0.05.
+
+\section{Modelos}
+Todos los modelos usan pesos preentrenados en ImageNet mediante \texttt{timm}, reciben las mismas imágenes y se ajustan para las diez clases.
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{ResNet34:} red convolucional residual y referencia directa del benchmark original de Paddy Doctor.
+    \item \textbf{EfficientNet-B0:} red convolucional eficiente usada como baseline compacto.
+    \item \textbf{ViT-Small/16:} Transformer visual con parches de \(16\times16\), para evaluar atención global.
+    \item \textbf{Híbrido EfficientNet-B0 + ViT-Small/16:} concatena las representaciones globales de ambas ramas; una cabeza con LayerNorm, dropout, capa densa de 512 unidades, GELU y salida de diez clases produce la predicción.
+\end{enumerate}
+
+\section{Entrenamiento y evaluación}
+Se usa AdamW con weight decay \(10^{-4}\), tasa de aprendizaje \(10^{-4}\) para los backbones y \(3\times10^{-4}\) para las cabezas clasificadoras. El batch de entrenamiento es 16; las épocas pueden llegar a 20. Un planificador ReduceLROnPlateau reduce la tasa de aprendizaje cuando el F1 macro de validación deja de mejorar. Se selecciona el checkpoint con mejor F1 macro de validación y se detiene el ajuste tras cuatro épocas consecutivas sin mejora. La precisión mixta se activa solo si el entorno informa CUDA disponible; el uso real de GPU y su modelo deben registrarse desde la ejecución final.
+
+La métrica principal es F1 macro, que calcula el F1 por clase y luego promedia dando el mismo peso a cada clase. Se reportan también accuracy, balanced accuracy y F1 ponderado. Para interpretar errores se guardan el reporte por clase y la matriz de confusión. No se usa el test para elegir hiperparámetros ni checkpoints.
+
+\subsection{Control de reproducibilidad}
+La semilla se fija en 42 para Python, NumPy y PyTorch. El protocolo es una única partición; por ello, no se estimará variabilidad entre semillas. Para cerrar la ejecución se deben añadir al registro la versión de Python, PyTorch, \texttt{timm}, CUDA, la GPU realmente usada, fecha de ejecución y cualquier interrupción. La semilla por sí sola no garantiza determinismo bit a bit en todos los kernels de GPU.
+
+\section{Resultados}
+\subsection{Avance de la ejecución local}
+La captura compartida muestra que ResNet34 llegó a la época 20/20 y que EfficientNet-B0 había comenzado su entrenamiento, con tres épocas visibles. La captura solo contiene valores de validación y no identifica el dispositivo; por tanto, estos datos describen el avance, no el resultado final del benchmark. Las métricas publicadas en la Tabla 1 siguen siendo referencias externas y se distinguen de esta corrida local.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Valores visibles en la captura de la ejecución actual. Son métricas intermedias de validación; no son métricas de test.}
+\begin{tabular}{lrrrrr}
+\toprule
+Modelo & Época & Pérdida train & F1 macro val. & Accuracy val. & Tiempo (s) \\
+\midrule
+ResNet34 & 17/20 & 0.5530 & 0.9446 & 0.9443 & 144.6 \\
+ResNet34 & 18/20 & 0.5584 & 0.9397 & 0.9433 & 145.3 \\
+ResNet34 & 19/20 & 0.5473 & 0.9401 & 0.9452 & 143.8 \\
+ResNet34 & 20/20 & 0.5318 & 0.9418 & 0.9452 & 144.0 \\
+EfficientNet-B0 & 1/20 & 1.8305 & 0.7322 & 0.7502 & 148.1 \\
+EfficientNet-B0 & 2/20 & 1.0122 & 0.8163 & 0.8309 & 142.8 \\
+EfficientNet-B0 & 3/20 & 0.7943 & 0.8567 & 0.8809 & 142.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+En los valores visibles, el F1 macro de validación de ResNet34 alcanza 0.9446 en la época 17 y es 0.9418 en la época 20; la accuracy de validación es 0.9452 en las épocas 19 y 20. EfficientNet-B0 llega a F1 macro 0.8567 y accuracy 0.8809 en su tercera época. No es una comparación final equilibrada: los modelos están en etapas distintas y solo se muestran algunas épocas de ResNet34. El test permanece reservado para la evaluación final.
+
+\subsection{Tabla para el benchmark final}
+Completar esta tabla con la salida final de \texttt{comparison\_results.csv} después de verificar que cada ejecución terminó correctamente. No copiar aquí métricas de validación como si fueran de test.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Resultados de test del benchmark controlado. Las celdas quedan pendientes hasta finalizar y verificar la ejecución.}
+\begin{tabularx}{\textwidth}{Yccccc}
+\toprule
+Modelo & Accuracy & Balanced acc. & F1 macro & F1 ponderado & Mejor F1 macro val. \\
+\midrule
+ResNet34 & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente \\
+EfficientNet-B0 & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente \\
+ViT-Small/16 & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente \\
+Híbrido EfficientNet-B0 + ViT-Small/16 & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente & \metricapendiente \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Además de la tabla agregada, la versión final del informe debe incorporar los reportes por clase, matrices de confusión, número de épocas efectivas y duración/hardware de cada entrenamiento. El notebook genera \texttt{comparison\_results.csv}, reportes JSON por modelo y checkpoints; se debe confirmar que los archivos correspondan a la ejecución nueva y no a la corrida local incompleta.
+
+\section{Discusión}
+La comparación debe priorizar F1 macro y recall por clase, especialmente para etiquetas con menor representación. Un modelo con mayor accuracy global puede seguir fallando en clases minoritarias. El híbrido solo será preferible si la mejora de clasificación justifica su costo adicional de cómputo, memoria y despliegue. Si los resultados son similares, debe considerarse el modelo más simple o eficiente.
+
+Los valores de la literatura (Tabla 1) no constituyen una meta garantizada ni una comparación estadística directa. Esta evaluación usa una descarga de 10\,407 imágenes en diez clases, mientras los trabajos citados emplean configuraciones distintas. Además, mAP@0.5 mide detección localizada y no debe compararse con accuracy o F1 de clasificación de una etiqueta por imagen. Así, la respuesta a ``¿cuál es mejor?'' depende del alcance: ViT presenta la mayor accuracy publicada en los tres artículos revisados; para la descarga y partición de este trabajo, el mejor modelo sigue sin determinarse hasta terminar y analizar el test común.
+
+\section{Limitaciones}
+\begin{itemize}[leftmargin=*]
+    \item Una sola partición aleatoria estratificada no mide sensibilidad a la semilla y no descarta imágenes duplicadas o casi duplicadas entre particiones.
+    \item El rendimiento en esta descarga no demuestra generalización a fotografías de campo, dispositivos diferentes, iluminación variable ni otras regiones agrícolas.
+    \item Los aumentos geométricos pueden no representar toda la variabilidad real y los cambios de color requieren cautela porque la pigmentación de lesiones aporta información.
+    \item El experimento es de clasificación de imagen completa; no localiza lesiones ni sustituye una evaluación agronómica.
+    \item La captura actual contiene solo métricas parciales de validación; no incluye test ni confirma el dispositivo de cómputo.
+\end{itemize}
+
+\section{Conclusiones y trabajo pendiente}
+La revisión bibliográfica identifica al Vision Transformer de Khanal et al.\ como el mayor valor nominal de accuracy reportado (99.38\%), pero no como ganador demostrado frente a los otros artículos. Para los datos locales, la comparación homogénea entre ResNet34, EfficientNet-B0, ViT-Small/16 y el híbrido debe decidirse con el test común, el comportamiento por clase y el costo de ejecución.
+
+\noindent\textbf{Conclusión sobre la literatura:} ViT tiene la accuracy publicada más alta de las revisadas; esto es una comparación descriptiva y no una prueba de superioridad entre estudios.
+
+\noindent\textbf{Conclusión empírica local:} \pendiente. La ejecución visible todavía está en EfficientNet-B0; faltan ViT-Small/16, el híbrido y las métricas finales de test. Se actualizará la Tabla 3 al finalizar y verificar la corrida. Las cifras de la Tabla 1 conservan su atribución a los artículos.
+
+\begin{thebibliography}{9}
+\bibitem{petchiammal2023}
+S. Petchiammal, B. Kiruba, M. Murugan y P. Arjunan.
+\newblock Paddy Doctor: A Visual Image Dataset for Automated Paddy Disease Classification and Benchmarking.
+\newblock En \emph{Proceedings of the 6th Joint International Conference on Data Science \& Management of Data (CODS-COMAD 2023)}, pp. 203--207, 2023.
+\newblock \url{https://doi.org/10.1145/3570991.3570994}.
+
+\bibitem{khanal2024}
+B. Khanal, P. Poudel, A. Chapagai, B. Regmi, S. Pokhrel y S. R. Khanal.
+\newblock Paddy Disease Detection and Classification Using Computer Vision Techniques: A Mobile Application to Detect Paddy Disease.
+\newblock arXiv:2412.05996v1, 2024.
+\newblock \url{https://arxiv.org/abs/2412.05996}.
+
+\bibitem{subbarayudu2025}
+C. Subbarayudu y M. Kubendiran.
+\newblock An automated hybrid deep learning framework for paddy leaf disease identification and classification.
+\newblock \emph{Scientific Reports}, 15, 2025.
+\newblock \url{https://doi.org/10.1038/s41598-025-08071-6}.
+\end{thebibliography}
+
+\end{document}

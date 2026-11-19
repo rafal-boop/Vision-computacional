@@ -1,0 +1,209 @@
+\documentclass[aspectratio=169,11pt]{beamer}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\usetheme{Madrid}
+\usecolortheme{default}
+\definecolor{arrozverde}{RGB}{34,105,82}
+\definecolor{arrozoscuro}{RGB}{31,49,61}
+\definecolor{arrozoro}{RGB}{196,143,45}
+\setbeamercolor{structure}{fg=arrozverde}
+\setbeamercolor{title}{fg=arrozoscuro}
+\setbeamercolor{frametitle}{fg=arrozoscuro}
+\setbeamercolor{alerted text}{fg=arrozoro}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\newcommand{\tiempo}[1]{\vfill\hfill\scriptsize\textit{Tiempo sugerido: #1}}
+\newcommand{\pendiente}{\textcolor{arrozoro}{\textbf{pendiente}}}
+
+\title{Comparación de modelos para clasificar enfermedades en hojas de arroz}
+\subtitle{Paddy Doctor: CNN, Vision Transformer e híbrido}
+\author{[Nombre del autor]}
+\institute{[Institución]}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+    \titlepage
+    \begin{center}
+        \small Exposición estimada: 10 minutos \textbullet\ Síntesis bibliográfica y benchmark local en curso
+    \end{center}
+    \tiempo{0:20}
+\end{frame}
+
+\begin{frame}{Problema y pregunta}
+    \begin{itemize}
+        \item Las enfermedades del arroz afectan rendimiento y calidad; una foto puede apoyar una evaluación rápida.
+        \item \textbf{Pregunta:} ¿qué arquitectura reconoce mejor las diez clases del conjunto local sin ignorar las clases minoritarias?
+        \item No se asume que el modelo más complejo sea el mejor: mediremos precisión y costo.
+        \item El objetivo es \textbf{clasificar una imagen completa}; no localizar lesiones ni sustituir al especialista.
+    \end{itemize}
+    \tiempo{0:50}
+\end{frame}
+
+\begin{frame}{Qué aportan los estudios previos}
+    \small
+    \begin{tabularx}{\textwidth}{p{3.3cm}p{4.0cm}Y}
+        \toprule
+        Estudio & Propuesta y cifra reportada & Cómo interpretarla aquí \\
+        \midrule
+        Petchiammal et al.\ (2023) & ResNet34; F1 97.50\%; 16\,225 imágenes y 13 clases. & Referencia sobre Paddy Doctor; no es la misma partición local. \\
+        Khanal et al.\ (2024) & ViT: accuracy 99.38\%; YOLOv8: mAP@0.5 69\%. & Detección y clasificación son tareas diferentes; el artículo tiene cifras internas discrepantes. \\
+        Subbarayudu y Kubendiran (2025) & 13\,866 imágenes/13 clases; MobileNetV3 + GKSO-SA + CatBoost; accuracy 98.52\%. & Pipeline diferente; el artículo reporta también F1 97.54\%. \\
+        \bottomrule
+    \end{tabularx}
+    \vspace{0.25cm}
+    \begin{block}{Idea clave}
+        Son antecedentes, no una tabla de posiciones directa: cambian el número de clases, la versión de datos y el protocolo.
+    \end{block}
+    \tiempo{1:05}
+\end{frame}
+
+\begin{frame}{Nuestro conjunto de datos}
+    \begin{columns}[T]
+        \column{0.48\textwidth}
+        \begin{block}{Tamaño y partición}
+            \begin{itemize}
+                \item 10\,407 imágenes, 10 clases.
+                \item Train: 8\,325 (80\%).
+                \item Validación: 1\,041 (10\%).
+                \item Test: 1\,041 (10\%).
+                \item División estratificada, semilla 42, idéntica para los modelos.
+            \end{itemize}
+        \end{block}
+        \column{0.48\textwidth}
+        \begin{block}{Desbalance}
+            \begin{itemize}
+                \item Ejemplos: bacterial panicle blight 337; bacterial leaf streak 380.
+                \item Clases más frecuentes: normal 1\,764; blast 1\,738.
+                \item Se pondera la pérdida usando solo las frecuencias de train.
+            \end{itemize}
+        \end{block}
+    \end{columns}
+    \tiempo{0:55}
+\end{frame}
+
+\begin{frame}{Metodología: datos y aumentos}
+    \begin{enumerate}
+        \item Imágenes RGB a \(224\times224\); normalización ImageNet.
+        \item Aumentos \textbf{solo en train}, aleatorios en cada época:
+        \begin{itemize}
+            \item volteos horizontal/vertical;
+            \item pequeñas rotaciones, traslaciones, cambios de escala y shear;
+            \item variaciones moderadas de brillo, contraste, saturación y tono.
+        \end{itemize}
+        \item Validación/test: solo redimensionamiento y normalización.
+        \item El aumento es en línea: crea variantes temporales, no nuevas copias en disco.
+    \end{enumerate}
+    \begin{alertblock}{Prevención de fuga}
+        La partición se realiza antes del aumento; el test se reserva y se consulta al final.
+    \end{alertblock}
+    \tiempo{1:20}
+\end{frame}
+
+\begin{frame}{Cuatro modelos, un protocolo}
+    \begin{columns}[T]
+        \column{0.49\textwidth}
+        \begin{block}{Modelos individuales}
+            \begin{itemize}
+                \item \textbf{ResNet34}: CNN residual; referencia del benchmark.
+                \item \textbf{EfficientNet-B0}: CNN eficiente; baseline compacto.
+                \item \textbf{ViT-Small/16}: Transformer visual; atención global.
+            \end{itemize}
+        \end{block}
+        \column{0.49\textwidth}
+        \begin{block}{Híbrido}
+            \textbf{EfficientNet-B0 + ViT-Small/16}
+            \begin{itemize}
+                \item Extrae rasgos con las dos ramas preentrenadas.
+                \item Concatena rasgos globales.
+                \item Cabeza común: LayerNorm, dropout y clasificador.
+            \end{itemize}
+        \end{block}
+    \end{columns}
+    \vspace{0.2cm}
+    Todos parten de pesos ImageNet y usan las mismas particiones e imágenes.
+    \tiempo{1:05}
+\end{frame}
+
+\begin{frame}{Entrenamiento y criterios de evaluación}
+    \begin{itemize}
+        \item Transfer learning con ajuste fino; AdamW, tasas diferenciadas para backbone y cabeza.
+        \item Batch 16; máximo 20 épocas; early stopping tras 4 épocas sin mejora.
+        \item Checkpoint elegido por \textbf{F1 macro de validación}; precisión mixta solo si CUDA está disponible.
+        \item Métrica principal: \textbf{F1 macro}; complementarias: accuracy, balanced accuracy y F1 ponderado.
+        \item Reporte por clase y matriz de confusión para ver qué enfermedades se confunden.
+    \end{itemize}
+    \begin{block}{Regla de decisión}
+        Comparar primero F1 macro y recall por clase; luego considerar memoria, tiempo e inferencia.
+    \end{block}
+    \tiempo{1:10}
+\end{frame}
+
+\begin{frame}{Referencias provisionales: resultados publicados}
+    \small
+    \begin{tabularx}{\textwidth}{p{3.1cm}p{4.0cm}Y}
+            \toprule
+            Estudio & Modelo o pipeline & Cifras reportadas por los autores \\
+            \midrule
+            Petchiammal et al.\ (2023) & ResNet34; 16\,225 imágenes/13 clases & F1: 97.50\% \\
+            Khanal et al.\ (2024) & Vision Transformer; el mismo artículo también evalúa YOLOv8 & Accuracy: 99.38\%; YOLOv8 mAP@0.5: 69\% \\
+            Subbarayudu y Kubendiran (2025) & MobileNetV3 + GKSO-SA + CatBoost; 13\,866 imágenes/13 clases & Accuracy: 98.52\%; F1: 97.54\% \\
+            \bottomrule
+    \end{tabularx}
+    \begin{alertblock}{Atribución}
+        Estas son cifras publicadas por los tres estudios; no son resultados de nuestros entrenamientos.
+    \end{alertblock}
+    \tiempo{1:10}
+\end{frame}
+
+\begin{frame}{Avance actual y lectura comparativa}
+    \begin{itemize}
+        \item \textbf{Captura de la corrida}: ResNet34 terminó 20/20; F1 macro val. 0.9418 y accuracy val. 0.9452 en la última época visible.
+        \item EfficientNet-B0 va por 3/20: F1 macro val. 0.8567 y accuracy val. 0.8809; su métrica aún puede cambiar.
+        \item La captura no muestra dispositivo y no incluye test; son avances, no resultados finales.
+        \item En los artículos, la mayor accuracy publicada es la del Vision Transformer: 99.38\%. Una posible ventaja es el contexto global, pero no es prueba de causalidad.
+        \item \textbf{No hay ganador demostrado entre estudios}: cambian datos y protocolos; la brecha 99.38--98.52 es descriptiva, no una comparación controlada.
+    \end{itemize}
+    \begin{block}{Resultado propio}
+        Faltan ViT-Small/16, el híbrido y las métricas de test para elegir el mejor en nuestro conjunto.
+    \end{block}
+    \tiempo{0:55}
+\end{frame}
+
+\begin{frame}{Conclusiones y próximos pasos}
+    \begin{enumerate}
+        \item Terminar el benchmark local y registrar dispositivo, versiones y checkpoints.
+        \item Actualizar las métricas de test y revisar recall/F1 por clase y matrices de confusión.
+        \item Elegir el modelo por equilibrio entre desempeño y costo; no extrapolar el 99.38\% de otro estudio.
+        \item Validar después con fotos externas y, si el uso lo requiere, añadir explicabilidad y evaluación agronómica.
+    \end{enumerate}
+    \begin{block}{Conclusión empírica}
+        En la literatura, ViT tiene la mayor accuracy reportada; en nuestro conjunto, el ganador sigue \pendiente.
+    \end{block}
+    \tiempo{1:00}
+\end{frame}
+
+\begin{frame}{Referencias breves}
+    \footnotesize
+    \begin{itemize}
+        \item Petchiammal et al.\ (2023). \emph{Paddy Doctor: A Visual Image Dataset for Automated Paddy Disease Classification and Benchmarking}. DOI: \url{https://doi.org/10.1145/3570991.3570994}.
+        \item Khanal et al.\ (2024). \emph{Paddy Disease Detection and Classification Using Computer Vision Techniques}. arXiv:2412.05996.
+        \item Subbarayudu y Kubendiran (2025). \emph{An automated hybrid deep learning framework for paddy leaf disease identification and classification}. \emph{Scientific Reports}, 15. DOI: \url{https://doi.org/10.1038/s41598-025-08071-6}.
+    \end{itemize}
+    \begin{center}
+        \large Gracias
+    \end{center}
+    \tiempo{0:10}
+\end{frame}
+
+\end{document}
